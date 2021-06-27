@@ -1,4 +1,4 @@
-# Accept payments via twilio and stripe, complete server less solution (AWS LAMBDA, API Gateway, LAMBDA)
+# Accept payments via twilio and stripe, complete server less solution (AWS LAMBDA, API Gateway, Cognito)
 
 Twilio has default payment gateway integration with stripe, But we did bit customization to double confirm the credit card number, amount to be collected.
 
