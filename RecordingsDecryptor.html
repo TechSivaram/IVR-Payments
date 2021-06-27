@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<!-- Follow "Per Recording Decryption Steps"
+ https://www.twilio.com/docs/voice/tutorials/call-recording-encryption#per-recording-decryption-steps-customer -->
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Twilio PKE Recording Decryptor</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <style>
+        th,
+        td {
+            padding: 15px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <br />
+        <table>
+            <tr style="font-size:x-large; font-weight: bold;">
+                <td sty>VoiceMail From: </td>
+                <td id="ph" style="color: blue;"> </td>
+            </tr>
+            <tr>
+                <td colspan="2"><audio id="clip" controls=></audio></td>
+            </tr>
+        </table>
+    </div>
+
+    <script>
+
+        if (window.location.hash) {
+            const params = new URLSearchParams(window.location.hash.replace('#', ''));
+            localStorage.setItem('token', params.get('id_token'));
+        }
+        else {
+            const params = new URLSearchParams(window.location.search)
+            if (!params.has('p')) {
+                throw 'InvalidRequest';
+            }
+            else {
+                localStorage.setItem("sid", params.get('p'));
+                localStorage.setItem("ph", params.get('ph'));
+            }
+        }
+
+        if (!localStorage.getItem('token') || isTokenExpired(localStorage.getItem('token'))) {
+            var url = window.location.href;
+            url = url.substring(0, url.indexOf("?"));
+            window.location.href = 'https://sivaram.auth.us-south-1.amazoncognito.com/login?response_type=token&client_id=cognitoclientid&redirect_uri=' + url;
+        }
+        else {
+            document.getElementById('ph').innerText = localStorage.getItem('ph')
+        }
+
+        const formatPrivateKey = pem => {
+            return atob(pem);
+        };
+
+        function isTokenExpired(token) {
+            var to = parseJwt(token);
+
+            if (to.exp < Date.now() / 1000) {
+                return true;
+            }
+            else {
+                return false;
+            }
+        }
+
+        function parseJwt(token) {
+            return JSON.parse(atob(token.split('.')[1]));
+        }
+
+        const stringToArrayBuffer = byteString => {
+            const byteArray = new Uint8Array(byteString.length);
+            for (let i = 0; i < byteString.length; i++) {
+                byteArray[i] = byteString.charCodeAt(i);
+            }
+            return byteArray;
+        };
+
+        const importPrivateKey = key => {
+            return new Promise((resolve, reject) => {
+                const formattedPrivateKey = formatPrivateKey(key)
+                const privateKeyArrayBuffer = stringToArrayBuffer(formattedPrivateKey);
+                return window.crypto.subtle.importKey(
+                    "pkcs8",
+                    privateKeyArrayBuffer,
+                    {
+                        name: "RSA-OAEP",
+                        hash: { name: "SHA-256" }
+                    },
+                    true,
+                    ["decrypt"]
+                ).then(privateKey => {
+                    resolve(privateKey)
+                }).catch(err => {
+                    console.log(err);
+                    reject(err)
+                });
+            });
+        };
+
+        const decryptCEK = async (cek, cryptoKey) => {
+            return new Promise((resolve, reject) => {
+                return window.crypto.subtle.decrypt(
+                    {
+                        name: 'RSA-OAEP'
+                    },
+                    cryptoKey,
+                    stringToArrayBuffer(atob(cek))
+                ).then(privateKey => {
+                    resolve(privateKey)
+                }).catch(err => {
+                    console.log(err);
+                    reject(err)
+                });
+            });
+        };
+
+        const importCEK = async (cek) => {
+            return new Promise((resolve, reject) => {
+                return window.crypto.subtle.importKey(
+                    "raw",
+                    cek,
+                    {
+                        name: "AES-GCM",
+                        hash: { name: "SHA-256" }
+                    },
+                    true,
+                    ["decrypt"]
+                ).then(privateKey => {
+                    resolve(privateKey)
+                }).catch(err => {
+                    console.log(err);
+                    reject(err)
+                });
+            });
+        };
+
+        const readFile = async (audio) => {
+            return new Promise((resolve, reject) => {
+                var blob = null;
+                var xhr = new XMLHttpRequest();
+                xhr.open("GET", audio);
+                xhr.responseType = "blob";//force the HTTP response, response-type header to be blob
+                xhr.onload = function () {
+                    blob = xhr.response;//xhr.response is now a blob object
+                    resolve(blob);
+                }
+                xhr.send();
+            });
+        }
+
+        const decryptAudio = async (audio, cek, iv) => {
+            return new Promise(async (resolve, reject) => {
+                const reader = new FileReader();
+                fileb = await readFile(audio);
+                reader.readAsArrayBuffer(fileb);
+
+                reader.onloadend = e => {
+                    const audioFile = e.target.result;
+                    window.crypto.subtle.decrypt(
+                        {
+                            name: 'AES-GCM',
+                            iv: stringToArrayBuffer(atob(iv)),
+                        },
+                        cek,
+                        audioFile
+                    ).then(decryptedAudio => {
+                        resolve(decryptedAudio)
+                    }).catch(err => reject(err));
+                }
+            });
+        };
+
+        const getRecordingEncryptionDetails = async (acsid, sid) => {
+            return new Promise((resolve, reject) => {
+                var encryptiondetailsURL = 'https://api.twilio.com/2010-04-01/Accounts/' + acsid + '/Recordings/' + sid + '.json';
+                var json = null;
+                var xhr = new XMLHttpRequest();
+                xhr.open("GET", encryptiondetailsURL);
+                xhr.responseType = "application/json";//force the HTTP response, response-type header to be blob
+                xhr.onload = function () {
+                    json = xhr.response;//xhr.response is now a blob object
+                    resolve(json);
+                }
+                xhr.send();
+            });
+        };
+
+        const getKeyDetails = async (token) => {
+            return new Promise((resolve, reject) => {
+                var json = null;
+                var xhr = new XMLHttpRequest();
+
+                // this is lambda created with 'decryptionHandler'
+                xhr.open("GET", 'https://apigatewayurl/dev');
+                xhr.setRequestHeader("Authorization", token);
+                xhr.responseType = "application/json";//force the HTTP response, response-type header to be blob
+                xhr.onload = function () {
+                    json = xhr.response;//xhr.response is now a blob object
+                    resolve(json);
+                }
+                xhr.send();
+            });
+        }
+
+        const decryptFile = async () => {
+            //twilio recording sid
+            sid = localStorage.getItem("sid");
+            //twilio key will give accountid, privatekey
+            var keys = JSON.parse(await getKeyDetails(localStorage.getItem('token')));
+            // 1) Obtain encrypted_cek, iv parameters within EncryptionDetails via recordingStatusCallback or
+            // by performing a GET on the recording resource
+            const audioFile = 'https://api.twilio.com/2010-04-01/Accounts/' + keys.acid + '/Recordings/' + sid;
+            const privateKeyFile = keys.key;
+
+            //get recording encryption details to decrypt
+            var encDet = JSON.parse(await getRecordingEncryptionDetails(keys.acid, sid));
+
+            const encryptedCEK = encDet.encryption_details.encrypted_cek.trim();
+            const encryptionIV = encDet.encryption_details.iv.trim();
+
+            // 2) Retrieve customer private key corresponding to public_key_sid and use it to decrypt base 64 decoded
+            // encrypted_cek via RSAES-OAEP-SHA256-MGF1
+            var importedKey = await importPrivateKey(privateKeyFile);
+            var decryptedCEK = await decryptCEK(encryptedCEK, importedKey);
+            var importedCEK = await importCEK(decryptedCEK);
+
+            var decryptedAudio = await decryptAudio(audioFile, importedCEK, encryptionIV);
+
+            playByteArray(decryptedAudio);
+        };
+
+        function playByteArray(bytes) {
+            const blob = new Blob([bytes], { type: "audio/wav" });
+            var audio = document.getElementById('clip');
+            audio.src = window.URL.createObjectURL(blob);
+        }
+
+        decryptFile();
+
+    </script>
+</body>
+
+</html>

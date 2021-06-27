@@ -1,0 +1,21 @@
+{
+  "name": "voicemail",
+  "version": "1.0.0",
+  "description": "to handle twilio voice mail requirements",
+  "main": "index.js",
+  "dependencies": {
+    "@types/stripe": "^8.0.417",
+    "stripe": "^8.127.0",
+    "twilio": "^3.52.0"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git@gitlab.apeasycloud.com:BackOffice/VoiceMail.git"
+  },
+  "author": "sivaram",
+  "license": "ISC"
+}
